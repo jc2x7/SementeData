@@ -50,6 +50,89 @@
       font-size: 0.9rem;
     }
 
+    .divider {
+      display: flex;
+      align-items: center;
+      margin: 1.2rem 0;
+      color: #999;
+      font-size: 0.85rem;
+    }
+
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .divider span { margin: 0 0.8rem; }
+
+    .drive-area {
+      background: white;
+      border: 2px solid #2d6a2d;
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+    }
+
+    .drive-area h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+    .drive-area p { color: #666; font-size: 0.8rem; margin-bottom: 1rem; }
+
+    .drive-input-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .drive-input-row input[type="text"] {
+      flex: 1;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+
+    .drive-input-row button {
+      padding: 0.6rem 1.2rem;
+      background: #2d6a2d;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .drive-input-row button:disabled {
+      background: #999;
+      cursor: not-allowed;
+    }
+
+    .drive-input-row button:hover:not(:disabled) { background: #1a4a1a; }
+
+    .loading-bar {
+      margin-top: 0.8rem;
+      height: 4px;
+      background: #e0e0e0;
+      border-radius: 2px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .loading-bar.active { display: block; }
+
+    .loading-bar-fill {
+      height: 100%;
+      background: #2d6a2d;
+      width: 0%;
+      border-radius: 2px;
+      animation: loading 2s ease-in-out infinite;
+    }
+
+    @keyframes loading {
+      0% { width: 0%; }
+      50% { width: 70%; }
+      100% { width: 100%; }
+    }
+
     #status {
       margin-top: 1rem;
       padding: 0.8rem;
@@ -135,9 +218,23 @@
   </header>
 
   <main>
+    <div class="drive-area">
+      <h2>Carregar do Google Drive</h2>
+      <p>Cole o link de compartilhamento do Google Drive</p>
+      <div class="drive-input-row">
+        <input type="text" id="drive-url" placeholder="https://drive.google.com/file/d/...">
+        <button id="drive-btn">Carregar</button>
+      </div>
+      <div class="loading-bar" id="loading-bar">
+        <div class="loading-bar-fill"></div>
+      </div>
+    </div>
+
+    <div class="divider"><span>ou</span></div>
+
     <div class="upload-area" id="upload-area">
-      <h2>Carregar arquivo CSV</h2>
-      <p>Selecione o arquivo CSV exportado do Sigef</p>
+      <h2>Carregar arquivo local</h2>
+      <p>Selecione o arquivo CSV do seu dispositivo</p>
       <input type="file" id="csv-input" accept=".csv,.txt">
     </div>
 
@@ -155,19 +252,97 @@
   </main>
 
   <script>
-    const csvInput = document.getElementById('csv-input');
-    const status = document.getElementById('status');
-    const summary = document.getElementById('summary');
-    const tableContainer = document.getElementById('table-container');
-    const tableHead = document.getElementById('table-head');
-    const tableBody = document.getElementById('table-body');
-    const rowCount = document.getElementById('row-count');
+    var csvInput = document.getElementById('csv-input');
+    var status = document.getElementById('status');
+    var summary = document.getElementById('summary');
+    var tableContainer = document.getElementById('table-container');
+    var tableHead = document.getElementById('table-head');
+    var tableBody = document.getElementById('table-body');
+    var rowCount = document.getElementById('row-count');
+    var driveUrl = document.getElementById('drive-url');
+    var driveBtn = document.getElementById('drive-btn');
+    var loadingBar = document.getElementById('loading-bar');
 
     csvInput.addEventListener('change', function(e) {
-      const file = e.target.files[0];
+      var file = e.target.files[0];
       if (!file) return;
       readCSV(file);
     });
+
+    driveBtn.addEventListener('click', function() {
+      var url = driveUrl.value.trim();
+      if (!url) {
+        showStatus('Cole o link do Google Drive acima.', 'error');
+        return;
+      }
+      loadFromDrive(url);
+    });
+
+    driveUrl.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') driveBtn.click();
+    });
+
+    function extractDriveFileId(url) {
+      var match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (match) return match[1];
+      match = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      if (match) return match[1];
+      return null;
+    }
+
+    function loadFromDrive(url) {
+      var fileId = extractDriveFileId(url);
+      if (!fileId) {
+        showStatus('Link inválido. Use o link de compartilhamento do Google Drive.', 'error');
+        return;
+      }
+
+      driveBtn.disabled = true;
+      driveBtn.textContent = 'Carregando...';
+      loadingBar.classList.add('active');
+      showStatus('Baixando arquivo do Google Drive...', 'success');
+
+      var downloadUrl = 'https://drive.google.com/uc?export=download&id=' + fileId;
+
+      // Use corsproxy to bypass CORS restrictions
+      var proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(downloadUrl);
+
+      fetch(proxyUrl)
+        .then(function(response) {
+          if (!response.ok) throw new Error('Erro HTTP: ' + response.status);
+          return response.text();
+        })
+        .then(function(text) {
+          // Google Drive may return an HTML confirmation page for large files
+          var confirmMatch = text.match(/confirm=([a-zA-Z0-9_-]+)/);
+          if (confirmMatch && text.indexOf('<!DOCTYPE') !== -1) {
+            var confirmUrl = 'https://drive.google.com/uc?export=download&confirm=' + confirmMatch[1] + '&id=' + fileId;
+            var confirmProxy = 'https://corsproxy.io/?' + encodeURIComponent(confirmUrl);
+            return fetch(confirmProxy).then(function(r) { return r.text(); });
+          }
+          return text;
+        })
+        .then(function(text) {
+          loadingBar.classList.remove('active');
+          driveBtn.disabled = false;
+          driveBtn.textContent = 'Carregar';
+          try {
+            var result = parseCSV(text);
+            if (result.headers.length < 2) throw new Error('Dados insuficientes');
+            showStatus('Carregado do Drive: ' + result.rows.length + ' registros, ' + result.headers.length + ' colunas', 'success');
+            renderSummary(result.headers, result.rows);
+            renderTable(result.headers, result.rows);
+          } catch (err) {
+            showStatus('Erro ao processar. Verifique se o arquivo é CSV e está compartilhado como "Qualquer pessoa com o link".', 'error');
+          }
+        })
+        .catch(function(err) {
+          loadingBar.classList.remove('active');
+          driveBtn.disabled = false;
+          driveBtn.textContent = 'Carregar';
+          showStatus('Erro ao baixar. Verifique se o link está compartilhado como público.', 'error');
+        });
+    }
 
     function readCSV(file) {
       const reader = new FileReader();
