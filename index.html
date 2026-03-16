@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SementeData - Análise de Sementes e Mudas (Sigef)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f4f0;
+      color: #1a2e1a;
+      min-height: 100vh;
+    }
+
+    header {
+      background: linear-gradient(135deg, #2d6a2d, #1a4a1a);
+      color: white;
+      padding: 1.5rem;
+      text-align: center;
+    }
+
+    header h1 { font-size: 1.5rem; }
+    header p { opacity: 0.85; font-size: 0.9rem; margin-top: 0.3rem; }
+
+    main {
+      max-width: 960px;
+      margin: 1.5rem auto;
+      padding: 0 1rem;
+    }
+
+    .upload-area {
+      background: white;
+      border: 2px dashed #2d6a2d;
+      border-radius: 12px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .upload-area:hover { background: #f0f8f0; }
+    .upload-area h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+    .upload-area p { color: #666; font-size: 0.85rem; }
+
+    .upload-area input[type="file"] {
+      display: block;
+      margin: 1rem auto 0;
+      font-size: 0.9rem;
+    }
+
+    #status {
+      margin-top: 1rem;
+      padding: 0.8rem;
+      border-radius: 8px;
+      display: none;
+      font-size: 0.9rem;
+    }
+
+    #status.success { display: block; background: #d4edda; color: #155724; }
+    #status.error { display: block; background: #f8d7da; color: #721c24; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    .summary-card {
+      background: white;
+      border-radius: 10px;
+      padding: 1rem;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .summary-card .value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #2d6a2d;
+    }
+
+    .summary-card .label {
+      font-size: 0.75rem;
+      color: #666;
+      margin-top: 0.25rem;
+    }
+
+    #table-container {
+      margin-top: 1.5rem;
+      overflow-x: auto;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      display: none;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    th {
+      background: #2d6a2d;
+      color: white;
+      padding: 0.6rem 0.5rem;
+      text-align: left;
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+    }
+
+    td {
+      padding: 0.5rem;
+      border-bottom: 1px solid #eee;
+    }
+
+    tr:hover td { background: #f0f8f0; }
+
+    .row-count {
+      padding: 0.8rem;
+      font-size: 0.8rem;
+      color: #666;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SementeData</h1>
+    <p>Análise de Sementes e Mudas - Sigef</p>
+  </header>
+
+  <main>
+    <div class="upload-area" id="upload-area">
+      <h2>Carregar arquivo CSV</h2>
+      <p>Selecione o arquivo CSV exportado do Sigef</p>
+      <input type="file" id="csv-input" accept=".csv,.txt">
+    </div>
+
+    <div id="status"></div>
+
+    <div class="summary" id="summary"></div>
+
+    <div id="table-container">
+      <div class="row-count" id="row-count"></div>
+      <table>
+        <thead id="table-head"></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const csvInput = document.getElementById('csv-input');
+    const status = document.getElementById('status');
+    const summary = document.getElementById('summary');
+    const tableContainer = document.getElementById('table-container');
+    const tableHead = document.getElementById('table-head');
+    const tableBody = document.getElementById('table-body');
+    const rowCount = document.getElementById('row-count');
+
+    csvInput.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      readCSV(file);
+    });
+
+    function readCSV(file) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const text = e.target.result;
+        if (!text) return;
+        try {
+          const result = parseCSV(text);
+          showStatus('Carregado: ' + result.rows.length + ' registros, ' + result.headers.length + ' colunas', 'success');
+          renderSummary(result.headers, result.rows);
+          renderTable(result.headers, result.rows);
+        } catch (err) {
+          showStatus('Erro ao processar o CSV. Verifique o formato do arquivo.', 'error');
+        }
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+
+    function parseCSV(text) {
+      var lines = text.trim().split(/\r?\n/);
+      var separator = detectSeparator(lines[0]);
+      var headers = parseLine(lines[0], separator);
+      var rows = lines.slice(1)
+        .filter(function(line) { return line.trim().length > 0; })
+        .map(function(line) { return parseLine(line, separator); });
+      return { headers: headers, rows: rows };
+    }
+
+    function detectSeparator(line) {
+      var semicolons = (line.match(/;/g) || []).length;
+      var commas = (line.match(/,/g) || []).length;
+      var tabs = (line.match(/\t/g) || []).length;
+      if (tabs > commas && tabs > semicolons) return '\t';
+      if (semicolons > commas) return ';';
+      return ',';
+    }
+
+    function parseLine(line, sep) {
+      var result = [];
+      var current = '';
+      var inQuotes = false;
+      for (var i = 0; i < line.length; i++) {
+        var ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (ch === sep && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    }
+
+    function showStatus(msg, type) {
+      status.textContent = msg;
+      status.className = type;
+    }
+
+    function renderSummary(headers, rows) {
+      summary.innerHTML =
+        '<div class="summary-card"><div class="value">' + rows.length.toLocaleString('pt-BR') + '</div><div class="label">Registros</div></div>' +
+        '<div class="summary-card"><div class="value">' + headers.length + '</div><div class="label">Colunas</div></div>' +
+        '<div class="summary-card"><div class="value">' + countUnique(headers, rows) + '</div><div class="label">Valores únicos (col. 1)</div></div>';
+    }
+
+    function countUnique(headers, rows) {
+      var idx = headers.length > 1 ? 1 : 0;
+      var unique = new Set(rows.map(function(r) { return r[idx] || ''; }));
+      return unique.size;
+    }
+
+    function renderTable(headers, rows) {
+      tableHead.innerHTML = '<tr>' + headers.map(function(h) { return '<th>' + escapeHtml(h) + '</th>'; }).join('') + '</tr>';
+
+      var maxRows = 200;
+      var displayRows = rows.slice(0, maxRows);
+      tableBody.innerHTML = displayRows.map(function(row) {
+        return '<tr>' + row.map(function(cell) { return '<td>' + escapeHtml(cell) + '</td>'; }).join('') + '</tr>';
+      }).join('');
+
+      rowCount.textContent = rows.length > maxRows
+        ? 'Exibindo ' + maxRows + ' de ' + rows.length.toLocaleString('pt-BR') + ' registros'
+        : rows.length.toLocaleString('pt-BR') + ' registros';
+
+      tableContainer.style.display = 'block';
+    }
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
